@@ -1,1 +1,731 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JBELLE DASHBOARD | Panel de Administración</title>
 
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    :root { --primary: #0B8DA6; --accent: #B8848B; --bg: #F6E9E2; }
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+    body { background: linear-gradient(135deg, #F6E9E2 0%, #E8D5CC 100%); color: #0F172A; height: 100vh; overflow: hidden; }
+    #app { display: flex; height: 100vh; }
+    .sidebar { width: 280px; background: #0B8DA6; color: white; padding: 2.5rem 1.5rem; flex-shrink: 0; }
+    .nav-item { padding: 1rem; margin-bottom: 0.5rem; border-radius: 12px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 12px; user-select: none; }
+    .nav-item:hover, .nav-item.active { background: rgba(255,255,255,0.2); }
+    .main-content { flex: 1; padding: 2rem; overflow-y: auto; }
+    .glass-card { background: white; border-radius: 24px; padding: 2rem; box-shadow: 0 10px 30px rgba(0,0,0,0.04); }
+
+    table { width: 100%; border-collapse: separate; border-spacing: 0 10px; }
+    th { padding: 12px; color: #94A3B8; font-size: 0.75rem; text-transform: uppercase; text-align: left; }
+    td { padding: 15px; background: #F8FAFC; vertical-align: middle; }
+    td:first-child { border-radius: 12px 0 0 12px; }
+    td:last-child { border-radius: 0 12px 12px 0; }
+
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(5px); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
+    .modal-overlay.active { display: flex; }
+    .modal-body { background: white; width: 100%; max-width: 650px; padding: 2.2rem; border-radius: 30px; }
+
+    .view { display: none; }
+    .view.active { display: block; }
+
+    .btn-p { background: #0B8DA6; color: white; padding: 10px 16px; border-radius: 12px; font-weight: 800; }
+    .btn-p:hover { filter: brightness(0.95); }
+    .btn-ghost { background: #F1F5F9; color: #0F172A; padding: 10px 16px; border-radius: 12px; font-weight: 800; }
+    .btn-danger { background: #EF4444; color: white; padding: 10px 16px; border-radius: 12px; font-weight: 800; }
+
+    .input-b { width: 100%; padding: 12px; border: 1px solid #E2E8F0; border-radius: 12px; margin-bottom: 1rem; outline: none; }
+    .input-b:focus { border-color: rgba(11, 141, 166, 0.8); box-shadow: 0 0 0 3px rgba(11, 141, 166, 0.15); }
+
+    .stat { background: #ffffff; border-radius: 20px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,0.04); border: 1px solid rgba(148,163,184,0.25); }
+    .stat .label { color:#64748B; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .stat .value { font-size: 28px; font-weight: 900; margin-top: 6px; color: #0B8DA6; }
+    .muted { color:#64748B; }
+    .badge { display:inline-flex; align-items:center; gap:6px; font-weight:800; font-size:12px; padding:6px 10px; border-radius:999px; background:#E2F7FB; color:#0B8DA6; }
+    .toast { position: fixed; right: 18px; bottom: 18px; background: #0F172A; color: white; padding: 12px 14px; border-radius: 14px; display:none; z-index:2000; max-width: 360px; }
+    .toast.show { display:block; }
+    .small { font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+
+<body>
+<div id="app">
+
+  <aside class="sidebar">
+    <h1 class="text-3xl font-black mb-1">J'Belle</h1>
+    <p class="text-[10px] opacity-70 mb-10 tracking-widest uppercase">Panel de Administración</p>
+
+    <nav>
+      <div class="nav-item active" data-view="dash">Dashboard</div>
+      <div class="nav-item" data-view="ventas">Ventas</div>
+      <div class="nav-item" data-view="inv">Inventario</div>
+      <div class="nav-item" data-view="fin">Reportes Financieros</div>
+    </nav>
+
+    <div class="mt-10 text-xs opacity-80 leading-relaxed">
+      <div class="font-bold">Estado</div>
+      <div id="status" class="opacity-90">Conectando…</div>
+      <div class="mt-2 small opacity-80">
+        API: <span class="mono">sheetdb.io</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main-content">
+
+    <!-- Dashboard -->
+    <div id="v-dash" class="view active">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold text-[#0B8DA6]">Resumen</h2>
+        <span class="badge" id="badge-sync">⏳ Sincronizando…</span>
+      </div>
+
+      <div id="dash-stats" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
+
+      <div class="glass-card">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-black text-lg text-[#0B8DA6]">Últimas ventas</div>
+          <button class="btn-p" data-open="modal-venta">+ Nueva Venta</button>
+        </div>
+        <div class="muted text-sm mb-4">Vista rápida de las últimas 5 ventas registradas.</div>
+
+        <table>
+          <thead>
+            <tr><th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th></tr>
+          </thead>
+          <tbody id="b-last-sales"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Ventas -->
+    <div id="v-ventas" class="view">
+      <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
+        <h2 class="text-2xl font-bold text-[#0B8DA6]">Ventas Realizadas</h2>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn-p" data-open="modal-venta">+ Nueva Venta</button>
+          <button class="btn-ghost" id="btn-csv-ventas">⬇️ Descargar CSV</button>
+          <button class="btn-ghost" id="btn-reload">🔄 Recargar</button>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <table id="t-sales">
+          <thead>
+            <tr>
+              <th>Fecha</th><th>Cliente</th><th>Total</th><th>Estado</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="b-sales"></tbody>
+        </table>
+        <div id="sales-empty" class="muted text-sm mt-4 hidden">Aún no hay ventas registradas.</div>
+      </div>
+    </div>
+
+    <!-- Inventario -->
+    <div id="v-inv" class="view">
+      <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-6">
+        <h2 class="text-2xl font-bold text-[#0B8DA6]">Inventario de Productos</h2>
+        <div class="flex gap-2 flex-wrap">
+          <button class="btn-p" data-open="modal-prod">+ Nuevo Producto</button>
+          <button class="btn-ghost" id="btn-csv-inv">⬇️ Descargar CSV</button>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <table id="t-inv">
+          <thead><tr><th>Producto</th><th>Estilo</th><th>Sucursal</th><th>Stock</th><th>Precio</th></tr></thead>
+          <tbody id="b-inv"></tbody>
+        </table>
+        <div id="inv-empty" class="muted text-sm mt-4 hidden">Aún no hay productos en inventario.</div>
+      </div>
+    </div>
+
+    <!-- Finanzas -->
+    <div id="v-fin" class="view">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-2xl font-bold text-[#0B8DA6]">Finanzas</h2>
+        <button class="btn-ghost" id="btn-csv-fin">⬇️ Descargar CSV</button>
+      </div>
+
+      <div class="glass-card">
+        <table id="t-fin">
+          <thead><tr><th>Fecha</th><th>Cliente</th><th>Neto</th></tr></thead>
+          <tbody id="b-fin"></tbody>
+        </table>
+        <div id="fin-empty" class="muted text-sm mt-4 hidden">Aún no hay datos financieros (se generan con ventas).</div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Modal Producto -->
+<div class="modal-overlay" id="modal-prod" aria-hidden="true">
+  <div class="modal-body">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-2xl font-black mb-6 text-[#0B8DA6]">Agregar Producto</h2>
+      <button class="btn-ghost" data-close="modal-prod">✕</button>
+    </div>
+
+    <form id="f-prod">
+      <input type="text" id="p-name" placeholder="Nombre del Producto" class="input-b" required>
+      <input type="text" id="p-style" placeholder="Estilo (Ej: Natural, Volumen)" class="input-b" required>
+      <input type="text" id="p-suc" placeholder="Sucursal (Ej: Tegucigalpa)" class="input-b" required>
+
+      <div class="grid grid-cols-2 gap-4">
+        <input type="number" id="p-stock" placeholder="Stock Inicial" class="input-b" required min="0">
+        <input type="number" id="p-price" placeholder="Precio (L)" class="input-b" required min="0" step="0.01">
+      </div>
+
+      <div class="flex gap-3 mt-4">
+        <button type="button" class="flex-1 btn-ghost" data-close="modal-prod">Cancelar</button>
+        <button type="submit" class="flex-1 btn-p">Guardar Producto</button>
+      </div>
+
+      <div class="muted small mt-4">
+        Nota: esto guarda en tu Google Sheet vía SheetDB.
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal Venta -->
+<div class="modal-overlay" id="modal-venta" aria-hidden="true">
+  <div class="modal-body">
+    <div class="flex items-start justify-between gap-4">
+      <h2 class="text-2xl font-black mb-6 text-[#0B8DA6]">Registrar Venta</h2>
+      <button class="btn-ghost" data-close="modal-venta">✕</button>
+    </div>
+
+    <form id="f-venta">
+      <input type="text" id="v-cliente" placeholder="Cliente" class="input-b" required>
+      <input type="text" id="v-telefono" placeholder="Teléfono" class="input-b" required>
+      <input type="text" id="v-direccion" placeholder="Dirección" class="input-b" required>
+      <input type="number" id="v-total" placeholder="Total (L)" class="input-b" required min="0" step="0.01">
+
+      <select id="v-estado" class="input-b" required>
+        <option value="Pendiente">Pendiente</option>
+        <option value="Pagado">Pagado</option>
+        <option value="Enviado">Enviado</option>
+        <option value="Entregado">Entregado</option>
+        <option value="Cancelado">Cancelado</option>
+      </select>
+
+      <div class="flex gap-3 mt-4">
+        <button type="button" class="flex-1 btn-ghost" data-close="modal-venta">Cancelar</button>
+        <button type="submit" class="flex-1 btn-p">Guardar Venta</button>
+      </div>
+
+      <div class="muted small mt-4">
+        Nota: se guarda en tu hoja <b>ventas</b>.
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(() => {
+  // =========================
+  // CONFIG
+  // =========================
+  const API = "https://sheetdb.io/api/v1/pfye2lgmsymzk";
+
+  // Hojas esperadas (nombres EXACTOS)
+  const SHEET_VENTAS = "ventas";
+  const SHEET_PROD   = "productos";
+
+  // =========================
+  // STATE
+  // =========================
+  let sales = [];
+  let products = [];
+
+  // =========================
+  // DOM HELPERS
+  // =========================
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  function setStatus(text) {
+    const el = $("#status");
+    if (el) el.textContent = text;
+  }
+
+  function setBadge(text) {
+    const el = $("#badge-sync");
+    if (el) el.textContent = text;
+  }
+
+  function toast(msg) {
+    const t = $("#toast");
+    if (!t) return;
+    t.textContent = msg;
+    t.classList.add("show");
+    setTimeout(() => t.classList.remove("show"), 2500);
+  }
+
+  function escapeHtml(str) {
+    return String(str ?? '')
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;')
+      .replaceAll('"','&quot;')
+      .replaceAll("'","&#039;");
+  }
+
+  function money(n) {
+    const val = Number(n || 0);
+    return val.toLocaleString('es-HN', { style: 'currency', currency: 'HNL' });
+  }
+
+  function todayHN() {
+    return new Date().toLocaleDateString('es-HN');
+  }
+
+  // =========================
+  // NAV
+  // =========================
+  function setView(view) {
+    $$('.view').forEach(v => v.classList.remove('active'));
+    const target = document.getElementById('v-' + view);
+    if (target) target.classList.add('active');
+
+    $$('.nav-item').forEach(n => n.classList.remove('active'));
+    const nav = $(`.nav-item[data-view="${CSS.escape(view)}"]`);
+    if (nav) nav.classList.add('active');
+  }
+
+  // =========================
+  // MODALS
+  // =========================
+  function openModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('active');
+    el.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('active');
+    el.setAttribute('aria-hidden', 'true');
+  }
+
+  function modalOutsideClick(e) {
+    if (e.target.classList.contains('modal-overlay')) {
+      e.target.classList.remove('active');
+      e.target.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  // ESC para cerrar modales
+  function onKeyDown(e) {
+    if (e.key === "Escape") {
+      $$('.modal-overlay.active').forEach(m => {
+        m.classList.remove('active');
+        m.setAttribute('aria-hidden', 'true');
+      });
+    }
+  }
+
+  // =========================
+  // SHEETDB API
+  // =========================
+  async function sheetGet(sheetName) {
+    const res = await fetch(`${API}?sheet=${encodeURIComponent(sheetName)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`GET ${sheetName} failed: ${res.status}`);
+    return await res.json();
+  }
+
+  async function sheetPost(sheetName, rowObj) {
+    const res = await fetch(`${API}?sheet=${encodeURIComponent(sheetName)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: [rowObj] })
+    });
+    if (!res.ok) throw new Error(`POST ${sheetName} failed: ${res.status}`);
+    return await res.json();
+  }
+
+  // DELETE por id: requiere columna 'id' o 'ID' en tu hoja ventas.
+  async function sheetDeleteById(sheetName, idValue) {
+    const url = `${API}/id/${encodeURIComponent(idValue)}?sheet=${encodeURIComponent(sheetName)}`;
+    const res = await fetch(url, { method: "DELETE" });
+    if (!res.ok) throw new Error(`DELETE ${sheetName} id=${idValue} failed: ${res.status}`);
+    return await res.json();
+  }
+
+  // =========================
+  // LOAD
+  // =========================
+  async function loadFromSheetDB() {
+    try {
+      setBadge("⏳ Sincronizando…");
+      setStatus("Cargando datos…");
+
+      const [v, p] = await Promise.all([
+        sheetGet(SHEET_VENTAS),
+        sheetGet(SHEET_PROD)
+      ]);
+
+      // SheetDB devuelve strings usualmente
+      sales = Array.isArray(v) ? v : [];
+      products = Array.isArray(p) ? p : [];
+
+      renderAll();
+
+      setBadge("✅ Sincronizado");
+      setStatus("Conectado ✅");
+      console.log("Datos cargados desde SheetDB ✅", { sales, products });
+    } catch (err) {
+      console.error(err);
+      setBadge("⚠️ Error");
+      setStatus("Error conectando ❌");
+      toast("Error conectando con SheetDB. Revisa consola (F12).");
+    }
+  }
+
+  // =========================
+  // RENDER
+  // =========================
+  function renderDashboard() {
+    const totalVentas = sales.reduce((acc, s) => acc + Number(s.total || 0), 0);
+    const cantidadVentas = sales.length;
+    const productosCount = products.length;
+    const stockTotal = products.reduce((acc, p) => acc + Number(p.stock || 0), 0);
+
+    const dash = $('#dash-stats');
+    dash.innerHTML = `
+      <div class="stat">
+        <div class="label">Total vendido</div>
+        <div class="value">${money(totalVentas)}</div>
+        <div class="muted text-sm mt-1">Suma de todas las ventas</div>
+      </div>
+      <div class="stat">
+        <div class="label">Ventas registradas</div>
+        <div class="value">${cantidadVentas}</div>
+        <div class="muted text-sm mt-1">Cantidad de órdenes</div>
+      </div>
+      <div class="stat">
+        <div class="label">Inventario</div>
+        <div class="value">${productosCount}</div>
+        <div class="muted text-sm mt-1">Stock total: ${stockTotal}</div>
+      </div>
+    `;
+
+    const last = sales.slice().reverse().slice(0, 5);
+    const tbody = $('#b-last-sales');
+    tbody.innerHTML = last.map(s => `
+      <tr>
+        <td>${escapeHtml(s.fecha)}</td>
+        <td>${escapeHtml(s.cliente)}</td>
+        <td>${money(s.total)}</td>
+        <td>${escapeHtml(s.estado)}</td>
+      </tr>
+    `).join('') || `
+      <tr><td colspan="4" class="muted">Aún no hay ventas para mostrar.</td></tr>
+    `;
+  }
+
+  function renderSales() {
+    const tbody = $('#b-sales');
+    const empty = $('#sales-empty');
+
+    if (!sales.length) {
+      tbody.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    // Mostrar últimas primero
+    const reversed = sales.slice().reverse();
+
+    tbody.innerHTML = reversed.map((sale, idxFromTop) => {
+      // el objeto original en sales:
+      const saleOriginal = sale;
+      const id = saleOriginal.id || saleOriginal.ID || "";
+
+      return `
+        <tr>
+          <td>${escapeHtml(saleOriginal.fecha)}</td>
+          <td>
+            <b>${escapeHtml(saleOriginal.cliente)}</b>
+            <div class="text-xs muted">${escapeHtml(saleOriginal.telefono || "")}</div>
+          </td>
+          <td>${money(saleOriginal.total)}</td>
+          <td>${escapeHtml(saleOriginal.estado)}</td>
+          <td class="flex gap-2 flex-wrap">
+            <button class="btn-ghost" data-copy="${idxFromTop}">📋 Copiar</button>
+            <button class="btn-danger" data-del="${escapeHtml(id)}" ${id ? "" : "disabled title='Agrega columna id en la hoja ventas para eliminar' style='opacity:.5;cursor:not-allowed;'"}>Eliminar</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderInventory() {
+    const tbody = $('#b-inv');
+    const empty = $('#inv-empty');
+
+    if (!products.length) {
+      tbody.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    tbody.innerHTML = products.map(p => `
+      <tr>
+        <td><b>${escapeHtml(p.nombre ?? p.name ?? "")}</b></td>
+        <td>${escapeHtml(p.estilo ?? p.style ?? "")}</td>
+        <td>${escapeHtml(p.sucursal ?? p.suc ?? "")}</td>
+        <td>${Number(p.stock || 0)}</td>
+        <td>${money(p.precio ?? p.price ?? 0)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderFinance() {
+    const tbody = $('#b-fin');
+    const empty = $('#fin-empty');
+
+    if (!sales.length) {
+      tbody.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+    empty.classList.add('hidden');
+
+    tbody.innerHTML = sales.slice().reverse().map(s => `
+      <tr>
+        <td>${escapeHtml(s.fecha)}</td>
+        <td>${escapeHtml(s.cliente)}</td>
+        <td>${money(s.neto || s.total || 0)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderAll() {
+    renderDashboard();
+    renderSales();
+    renderInventory();
+    renderFinance();
+  }
+
+  // =========================
+  // CSV
+  // =========================
+  function downloadCSV(filename, rows) {
+    if (!rows || !rows.length) {
+      alert('No hay datos para exportar.');
+      return;
+    }
+    const headers = Object.keys(rows[0]);
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replaceAll('"','""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // =========================
+  // WHATSAPP COPY
+  // =========================
+  function buildWhatsAppMessage(venta) {
+    const cliente = venta.cliente || "";
+    const telefono = venta.telefono || "";
+    const direccion = venta.direccion || "";
+    const total = venta.total || "";
+    const estado = venta.estado || "";
+    const fecha = venta.fecha || "";
+
+    return `Hola ${cliente} 👋
+
+Gracias por tu compra en *J'Belle* 💖
+
+📌 Fecha: ${fecha}
+📞 Teléfono: ${telefono}
+📍 Dirección: ${direccion}
+
+💰 Total: L ${total}
+🧾 Estado: ${estado}
+
+✨ ¡Tu pedido está confirmado! ✨
+Nos pondremos en contacto para coordinar la entrega 🚚`;
+  }
+
+  async function copyText(txt) {
+    try {
+      await navigator.clipboard.writeText(txt);
+      toast("✅ Mensaje copiado. Pégalo en WhatsApp.");
+    } catch {
+      // Fallback
+      const ta = document.createElement("textarea");
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      toast("✅ Mensaje copiado. Pégalo en WhatsApp.");
+    }
+  }
+
+  // =========================
+  // EVENTS
+  // =========================
+  function bindEvents() {
+    // Navegación
+    $$('.nav-item').forEach(item => {
+      item.addEventListener('click', () => setView(item.dataset.view));
+    });
+
+    // Abrir modales
+    $$('[data-open]').forEach(btn => {
+      btn.addEventListener('click', () => openModal(btn.getAttribute('data-open')));
+    });
+
+    // Cerrar modales
+    $$('[data-close]').forEach(btn => {
+      btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close')));
+    });
+
+    // Click fuera para cerrar
+    $$('.modal-overlay').forEach(m => m.addEventListener('click', modalOutsideClick));
+
+    // ESC
+    document.addEventListener("keydown", onKeyDown);
+
+    // Recargar
+    $("#btn-reload").addEventListener("click", () => loadFromSheetDB());
+
+    // Guardar producto -> SheetDB
+    $("#f-prod").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        setBadge("⏳ Guardando…");
+
+        const nombre = $("#p-name").value.trim();
+        const estilo = $("#p-style").value.trim();
+        const sucursal = $("#p-suc").value.trim();
+        const stock = Number($("#p-stock").value);
+        const precio = Number($("#p-price").value);
+
+        // IMPORTANTE: nombres de columnas
+        await sheetPost(SHEET_PROD, { nombre, estilo, sucursal, stock, precio });
+
+        e.target.reset();
+        closeModal("modal-prod");
+        toast("✅ Producto guardado");
+        await loadFromSheetDB();
+      } catch (err) {
+        console.error(err);
+        setBadge("⚠️ Error");
+        toast("❌ Error guardando producto (ver consola).");
+      }
+    });
+
+    // Guardar venta -> SheetDB
+    $("#f-venta").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        setBadge("⏳ Guardando…");
+
+        // Para eliminar luego: si tienes columna "id" en tu Sheet,
+        // puedes generar un id aquí (recomendado).
+        const id = "V-" + Date.now();
+
+        const fecha = todayHN();
+        const cliente = $("#v-cliente").value.trim();
+        const telefono = $("#v-telefono").value.trim();
+        const direccion = $("#v-direccion").value.trim();
+        const total = Number($("#v-total").value);
+        const estado = $("#v-estado").value;
+
+        // En tu hoja ventas, crea columna "id" y listo (esto lo llenará)
+        await sheetPost(SHEET_VENTAS, { id, fecha, cliente, telefono, direccion, total, estado });
+
+        e.target.reset();
+        closeModal("modal-venta");
+        toast("✅ Venta guardada");
+        await loadFromSheetDB();
+      } catch (err) {
+        console.error(err);
+        setBadge("⚠️ Error");
+        toast("❌ Error guardando venta (ver consola).");
+      }
+    });
+
+    // Delegación en tabla ventas (copiar / eliminar)
+    $("#b-sales").addEventListener("click", async (e) => {
+      const btnCopy = e.target.closest("[data-copy]");
+      if (btnCopy) {
+        const idxFromTop = Number(btnCopy.getAttribute("data-copy"));
+        const reversed = sales.slice().reverse();
+        const venta = reversed[idxFromTop];
+        if (venta) await copyText(buildWhatsAppMessage(venta));
+        return;
+      }
+
+      const btnDel = e.target.closest("[data-del]");
+      if (btnDel) {
+        const id = btnDel.getAttribute("data-del");
+        if (!id) {
+          toast("⚠️ Para eliminar, agrega columna 'id' en la hoja ventas.");
+          return;
+        }
+        if (!confirm("¿Eliminar esta venta?")) return;
+
+        try {
+          setBadge("⏳ Eliminando…");
+          await sheetDeleteById(SHEET_VENTAS, id);
+          toast("✅ Venta eliminada");
+          await loadFromSheetDB();
+        } catch (err) {
+          console.error(err);
+          setBadge("⚠️ Error");
+          toast("❌ No se pudo eliminar (ver consola).");
+        }
+      }
+    });
+
+    // CSV
+    $("#btn-csv-ventas").addEventListener("click", () => downloadCSV("ventas.csv", sales));
+    $("#btn-csv-inv").addEventListener("click", () => downloadCSV("inventario.csv", products));
+    $("#btn-csv-fin").addEventListener("click", () => {
+      const fin = sales.map(s => ({ fecha: s.fecha, cliente: s.cliente, neto: s.neto || s.total }));
+      downloadCSV("finanzas.csv", fin);
+    });
+  }
+
+  // =========================
+  // INIT
+  // =========================
+  document.addEventListener("DOMContentLoaded", async () => {
+    bindEvents();
+    setView("dash");
+    await loadFromSheetDB();
+    console.log("JBELLE + SheetDB listo ✅");
+  });
+
+})();
+</script>
+</body>
+</html>
