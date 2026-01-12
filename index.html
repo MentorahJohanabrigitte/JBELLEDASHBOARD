@@ -27,7 +27,7 @@
 
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(5px); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 16px; }
     .modal-overlay.active { display: flex; }
-    .modal-body { background: white; width: 100%; max-width: 650px; padding: 2.2rem; border-radius: 30px; }
+    .modal-body { background: white; width: 100%; max-width: 750px; padding: 2.2rem; border-radius: 30px; }
 
     .view { display: none; }
     .view.active { display: block; }
@@ -167,12 +167,17 @@
     <!-- Finanzas -->
     <div id="v-fin" class="view">
       <div class="flex items-center justify-between mb-6">
-        <h2 class="text-2xl font-bold text-[#0B8DA6]">Finanzas</h2>
+        <h2 class="text-2xl font-bold text-[#0B8DA6]">Reportes Financieros</h2>
         <button class="btn-ghost" id="btn-csv-fin">⬇️ Descargar CSV</button>
       </div>
 
       <div class="glass-card">
-        <div class="muted small mb-4">Este reporte respeta el mismo filtro de fechas aplicado en “Ventas”.</div>
+        <div class="muted small mb-4">
+          Este reporte respeta el mismo filtro de fechas aplicado en “Ventas”.<br>
+          Nota: a <b>todas</b> las ventas se les descuenta <b>L 90</b> por costo de envío. La comisión <b>5%</b> aplica solo a “Pago al recibir en efectivo”.
+        </div>
+
+        <!-- Cards finanzas se inyectan aquí por JS -->
         <table id="t-fin">
           <thead><tr><th>Fecha</th><th>Cliente</th><th>Neto</th></tr></thead>
           <tbody id="b-fin"></tbody>
@@ -225,16 +230,49 @@
     <form id="f-venta">
       <input type="text" id="v-cliente" placeholder="Cliente" class="input-b" required>
       <input type="text" id="v-telefono" placeholder="Teléfono" class="input-b" required>
+
+      <div class="grid grid-cols-2 gap-4">
+        <input type="text" id="v-departamento" placeholder="Departamento" class="input-b" required>
+        <input type="text" id="v-ciudad" placeholder="Ciudad" class="input-b" required>
+      </div>
+
       <input type="text" id="v-direccion" placeholder="Dirección" class="input-b" required>
-      <input type="number" id="v-total" placeholder="Total (L)" class="input-b" required min="0" step="0.01">
+
+      <!-- Productos -->
+      <div class="mt-2 mb-3">
+        <div class="font-extrabold text-sm text-[#0B8DA6] mb-2">Productos</div>
+        <div id="v-items" class="space-y-2"></div>
+
+        <button type="button" class="btn-ghost mt-2" id="btn-add-item">+ Agregar producto</button>
+
+        <div class="muted small mt-2">
+          El total se calcula automáticamente. Si el stock no alcanza, no deja guardar.
+        </div>
+      </div>
+
+      <input type="number" id="v-total" placeholder="Total (L)" class="input-b" required min="0" step="0.01" readonly>
 
       <select id="v-estado" class="input-b" required>
         <option value="Pendiente">Pendiente</option>
         <option value="Pagado">Pagado</option>
+        <option value="Pago al recibir en efectivo">Pago al recibir en efectivo</option>
         <option value="Enviado">Enviado</option>
         <option value="Entregado">Entregado</option>
         <option value="Cancelado">Cancelado</option>
       </select>
+
+      <!-- Banco / Link (solo si Pagado) -->
+      <div id="wrap-banco" class="hidden">
+        <select id="v-banco" class="input-b">
+          <option value="">Seleccionar banco...</option>
+          <option value="BAC">BAC</option>
+          <option value="Ficohsa">Ficohsa</option>
+          <option value="Atlantida">Atlantida</option>
+          <option value="Link">Link</option>
+        </select>
+
+        <input type="url" id="v-link" placeholder="Link de pago (si aplica)" class="input-b hidden">
+      </div>
 
       <div class="flex gap-3 mt-4">
         <button type="button" class="flex-1 btn-ghost" data-close="modal-venta">Cancelar</button>
@@ -242,7 +280,7 @@
       </div>
 
       <div class="muted small mt-4">
-        Tip recomendado: agrega columna <b>fecha_iso</b> en tu hoja ventas para filtros perfectos (este código ya la llena).
+        Costo envío: <b>L 90</b> por venta (se descuenta en finanzas). Comisión 5% solo en “Pago al recibir en efectivo”.
       </div>
     </form>
   </div>
@@ -258,6 +296,9 @@
   const API = "https://sheetdb.io/api/v1/pfye2lgmsymzk";
   const SHEET_VENTAS = "ventas";
   const SHEET_PROD   = "productos";
+
+  // Reglas financieras
+  const COSTO_ENVIO_POR_VENTA = 90; // L.90 por venta (SIEMPRE se descuenta)
 
   // =========================
   // STATE
@@ -329,6 +370,15 @@
     if (!el) return;
     el.classList.add('active');
     el.setAttribute('aria-hidden', 'false');
+
+    // Venta: inicializar 1 item si vacío
+    if (id === "modal-venta") {
+      const itemsWrap = document.getElementById("v-items");
+      if (itemsWrap && itemsWrap.children.length === 0) addSaleItemRow();
+      recalcSaleTotal();
+      const estadoSel = document.getElementById("v-estado");
+      if (estadoSel) estadoSel.dispatchEvent(new Event("change"));
+    }
   }
 
   function closeModal(id) {
@@ -358,10 +408,6 @@
   // FECHAS + FILTRO
   // =========================
   function parseDateToISO(fechaStr) {
-    // Soporta:
-    // - "YYYY-MM-DD"
-    // - "dd/mm/yyyy" (es-HN)
-    // - "d/m/yyyy"
     const s = String(fechaStr || "").trim();
 
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
@@ -417,6 +463,18 @@
     return await res.json();
   }
 
+  // Actualiza stock por nombre (recomendación: nombres únicos)
+  async function updateProductStockByName(nombreProducto, nuevoStock) {
+    const url = `${API}/nombre/${encodeURIComponent(nombreProducto)}?sheet=${encodeURIComponent(SHEET_PROD)}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data: { stock: String(nuevoStock) } })
+    });
+    if (!res.ok) throw new Error(`PATCH stock producto ${nombreProducto} failed: ${res.status}`);
+    return await res.json();
+  }
+
   // =========================
   // LOAD
   // =========================
@@ -444,6 +502,126 @@
       setStatus("Error conectando ❌");
       toast("Error conectando con SheetDB. Revisa consola (F12).");
     }
+  }
+
+  // =========================
+  // ITEMS DE VENTA (UI)
+  // =========================
+  function buildProductOptionsHTML() {
+    return products.map(p => {
+      const nombre = (p.nombre ?? p.name ?? "").trim();
+      const stock = Number(p.stock || 0);
+      const precio = Number(p.precio ?? p.price ?? 0);
+      return `<option value="${escapeHtml(nombre)}" data-precio="${precio}" data-stock="${stock}">
+        ${escapeHtml(nombre)} (Stock: ${stock}) - L ${precio}
+      </option>`;
+    }).join('');
+  }
+
+  function addSaleItemRow(prefillName = "") {
+    const wrap = document.createElement("div");
+    wrap.className = "grid grid-cols-12 gap-2 items-end";
+
+    wrap.innerHTML = `
+      <div class="col-span-6">
+        <div class="text-xs font-bold muted mb-1">Producto</div>
+        <select class="input-b si-prod" style="margin-bottom:0">
+          <option value="">Seleccionar...</option>
+          ${buildProductOptionsHTML()}
+        </select>
+      </div>
+
+      <div class="col-span-2">
+        <div class="text-xs font-bold muted mb-1">Cant.</div>
+        <input type="number" class="input-b si-qty" style="margin-bottom:0" min="1" value="1">
+      </div>
+
+      <div class="col-span-3">
+        <div class="text-xs font-bold muted mb-1">Precio (L)</div>
+        <input type="number" class="input-b si-price" style="margin-bottom:0" min="0" step="0.01">
+      </div>
+
+      <div class="col-span-1">
+        <button type="button" class="btn-danger w-full si-del">✕</button>
+      </div>
+    `;
+
+    const sel = wrap.querySelector(".si-prod");
+    const qty = wrap.querySelector(".si-qty");
+    const price = wrap.querySelector(".si-price");
+    const del = wrap.querySelector(".si-del");
+
+    if (prefillName) sel.value = prefillName;
+
+    sel.addEventListener("change", () => {
+      const opt = sel.selectedOptions[0];
+      if (!opt) return;
+      const precio = Number(opt.getAttribute("data-precio") || 0);
+      price.value = precio ? String(precio) : "";
+      recalcSaleTotal();
+    });
+
+    qty.addEventListener("input", recalcSaleTotal);
+    price.addEventListener("input", recalcSaleTotal);
+
+    del.addEventListener("click", () => {
+      wrap.remove();
+      recalcSaleTotal();
+    });
+
+    document.getElementById("v-items").appendChild(wrap);
+    recalcSaleTotal();
+  }
+
+  function getSaleItemsFromUI() {
+    const rows = Array.from(document.querySelectorAll("#v-items > div"));
+    return rows.map(r => {
+      const prod = r.querySelector(".si-prod").value.trim();
+      const qty = Number(r.querySelector(".si-qty").value || 0);
+      const price = Number(r.querySelector(".si-price").value || 0);
+      return { producto: prod, cantidad: qty, precio: price };
+    }).filter(i => i.producto && i.cantidad > 0);
+  }
+
+  function recalcSaleTotal() {
+    const items = getSaleItemsFromUI();
+    const total = items.reduce((acc, it) => acc + (Number(it.cantidad) * Number(it.precio)), 0);
+    const totalInput = document.getElementById("v-total");
+    if (totalInput) totalInput.value = total.toFixed(2);
+  }
+
+  function findProductByName(nombreProducto) {
+    const target = (nombreProducto || "").trim();
+    return products.find(p => ((p.nombre ?? p.name ?? "").trim() === target));
+  }
+
+  // =========================
+  // FINANZAS (cálculo)
+  // =========================
+  function calcFinanceSummary(filteredSales) {
+    const ventasValidas = filteredSales.filter(s => String(s.estado || "").toLowerCase() !== "cancelado");
+
+    const ventasBrutas = ventasValidas.reduce((acc, s) => acc + Number(s.total || 0), 0);
+    const costosEnvio = ventasValidas.length * COSTO_ENVIO_POR_VENTA;
+
+    const ventasEfectivo = ventasValidas.filter(s => (s.estado || "") === "Pago al recibir en efectivo");
+    const descuento5 = ventasEfectivo.reduce((acc, s) => acc + (Number(s.total || 0) * 0.05), 0);
+
+    const gananciaNeta = ventasBrutas - costosEnvio - descuento5;
+    return { ventasBrutas, costosEnvio, descuento5, gananciaNeta, ventasValidasCount: ventasValidas.length };
+  }
+
+  function computeNetoForRow(s) {
+    // Si ya viene neto guardado, úsalo
+    if (s.neto !== undefined && s.neto !== null && s.neto !== "") return Number(s.neto);
+
+    const total = Number(s.total || 0);
+    const comision = Number(s.comision_5 || 0);
+    // En finanzas SIEMPRE restamos envío si no está cancelado
+    const isCancel = String(s.estado || "").toLowerCase() === "cancelado";
+    const envio = isCancel ? 0 : COSTO_ENVIO_POR_VENTA;
+
+    return total - comision - envio;
   }
 
   // =========================
@@ -510,7 +688,6 @@
 
     tbody.innerHTML = reversed.map((sale, idxFromTop) => {
       const id = sale.id || sale.ID || "";
-
       return `
         <tr>
           <td>${escapeHtml(sale.fecha)}</td>
@@ -557,20 +734,70 @@
 
     const filtered = getFilteredSales();
 
+    // Para finanzas excluimos canceladas de la tabla? (aquí las mostramos, pero neto = 0 con envío 0)
     if (!filtered.length) {
       tbody.innerHTML = '';
       empty.classList.remove('hidden');
+      const finCards = document.getElementById("fin-cards");
+      if (finCards) finCards.innerHTML = "";
       return;
     }
     empty.classList.add('hidden');
 
-    tbody.innerHTML = filtered.slice().reverse().map(s => `
-      <tr>
-        <td>${escapeHtml(s.fecha)}</td>
-        <td>${escapeHtml(s.cliente)}</td>
-        <td>${money(s.neto || s.total || 0)}</td>
-      </tr>
-    `).join('');
+    const { ventasBrutas, costosEnvio, descuento5, gananciaNeta, ventasValidasCount } = calcFinanceSummary(filtered);
+
+    let finCards = document.getElementById("fin-cards");
+    if (!finCards) {
+      const table = document.getElementById("t-fin");
+      finCards = document.createElement("div");
+      finCards.id = "fin-cards";
+      finCards.className = "grid grid-cols-1 md:grid-cols-4 gap-4 mb-4";
+      table.parentElement.insertBefore(finCards, table);
+    }
+
+    finCards.innerHTML = `
+      <div class="stat">
+        <div class="label">Ventas brutas</div>
+        <div class="value">${money(ventasBrutas)}</div>
+        <div class="muted text-sm mt-1">Solo ventas NO canceladas</div>
+      </div>
+      <div class="stat">
+        <div class="label">Costos de envío</div>
+        <div class="value">${money(costosEnvio)}</div>
+        <div class="muted text-sm mt-1">L ${COSTO_ENVIO_POR_VENTA} × ${ventasValidasCount} ventas</div>
+      </div>
+      <div class="stat">
+        <div class="label">Comisión 5%</div>
+        <div class="value">${money(descuento5)}</div>
+        <div class="muted text-sm mt-1">Solo “Pago al recibir”</div>
+      </div>
+      <div class="stat">
+        <div class="label">Ganancia neta</div>
+        <div class="value">${money(gananciaNeta)}</div>
+        <div class="muted text-sm mt-1">Bruto - envío - comisión</div>
+      </div>
+    `;
+
+    tbody.innerHTML = filtered.slice().reverse().map(s => {
+      const neto = computeNetoForRow(s);
+      const estado = s.estado || "";
+      const banco = s.banco || "";
+      const isCancel = String(estado).toLowerCase() === "cancelado";
+      const envio = isCancel ? 0 : COSTO_ENVIO_POR_VENTA;
+      const com5 = (estado === "Pago al recibir en efectivo") ? (Number(s.comision_5 || (Number(s.total||0)*0.05))) : Number(s.comision_5 || 0);
+
+      return `
+        <tr>
+          <td>${escapeHtml(s.fecha)}</td>
+          <td>
+            <b>${escapeHtml(s.cliente)}</b>
+            <div class="text-xs muted">${escapeHtml(estado)}${banco ? " · " + escapeHtml(banco) : ""}</div>
+            <div class="text-xs muted">Envío: L ${envio} · Comisión: L ${com5.toFixed(2)}</div>
+          </td>
+          <td>${money(neto)}</td>
+        </tr>
+      `;
+    }).join('');
   }
 
   function renderAll() {
@@ -581,7 +808,7 @@
   }
 
   // =========================
-  // WHATSAPP COPY
+  // WHATSAPP COPY (NO TOCAR)
   // =========================
   function buildWhatsAppMessage(venta) {
     const cliente = venta.cliente || "";
@@ -692,6 +919,40 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
       toast("🧹 Filtro limpiado");
     });
 
+    // Botón agregar producto en venta
+    const btnAddItem = document.getElementById("btn-add-item");
+    if (btnAddItem) {
+      btnAddItem.addEventListener("click", () => addSaleItemRow());
+    }
+
+    // Mostrar/ocultar Banco/Link según estado
+    const estadoSel = document.getElementById("v-estado");
+    const wrapBanco = document.getElementById("wrap-banco");
+    const bancoSel = document.getElementById("v-banco");
+    const linkInp = document.getElementById("v-link");
+
+    function syncPagoUI() {
+      const estado = estadoSel?.value || "";
+      if (!wrapBanco) return;
+
+      if (estado === "Pagado") {
+        wrapBanco.classList.remove("hidden");
+      } else {
+        wrapBanco.classList.add("hidden");
+        if (bancoSel) bancoSel.value = "";
+        if (linkInp) { linkInp.value = ""; linkInp.classList.add("hidden"); }
+      }
+    }
+    if (estadoSel) estadoSel.addEventListener("change", syncPagoUI);
+
+    function syncLinkUI() {
+      const banco = bancoSel?.value || "";
+      if (!linkInp) return;
+      if (banco === "Link") linkInp.classList.remove("hidden");
+      else { linkInp.classList.add("hidden"); linkInp.value = ""; }
+    }
+    if (bancoSel) bancoSel.addEventListener("change", syncLinkUI);
+
     // Guardar producto -> SheetDB
     $("#f-prod").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -717,7 +978,7 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
       }
     });
 
-    // Guardar venta -> SheetDB (incluye fecha_iso)
+    // Guardar venta -> SheetDB + baja inventario + comisión + envío
     $("#f-venta").addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
@@ -725,19 +986,82 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
 
         const id = "V-" + Date.now();
         const fecha = todayHN();
-        const fecha_iso = todayISO(); // NUEVO: para filtrar perfecto
+        const fecha_iso = todayISO();
+
         const cliente = $("#v-cliente").value.trim();
         const telefono = $("#v-telefono").value.trim();
+        const departamento = $("#v-departamento").value.trim();
+        const ciudad = $("#v-ciudad").value.trim();
         const direccion = $("#v-direccion").value.trim();
-        const total = Number($("#v-total").value);
+
         const estado = $("#v-estado").value;
 
-        await sheetPost(SHEET_VENTAS, { id, fecha, fecha_iso, cliente, telefono, direccion, total, estado });
+        const banco = (estado === "Pagado") ? ($("#v-banco").value || "") : "";
+        const link_pago = (estado === "Pagado" && banco === "Link") ? ($("#v-link").value || "") : "";
 
+        // Items
+        const items = getSaleItemsFromUI();
+        if (!items.length) {
+          alert("Agrega al menos 1 producto.");
+          return;
+        }
+
+        // Validar stock
+        for (const it of items) {
+          const prod = findProductByName(it.producto);
+          if (!prod) {
+            alert(`Producto no encontrado en inventario: ${it.producto}`);
+            return;
+          }
+          const stockActual = Number(prod.stock || 0);
+          if (it.cantidad > stockActual) {
+            alert(`Stock insuficiente para "${it.producto}". Disponible: ${stockActual}`);
+            return;
+          }
+        }
+
+        // Total autocalculado
+        recalcSaleTotal();
+        const total = Number($("#v-total").value || 0);
+
+        // Comisión 5% solo para "Pago al recibir en efectivo"
+        const comision_5 = (estado === "Pago al recibir en efectivo") ? (total * 0.05) : 0;
+
+        // Envío SIEMPRE (en finanzas se descuenta a todas las ventas)
+        const costo_envio = COSTO_ENVIO_POR_VENTA;
+
+        // Neto
+        const neto = total - comision_5 - costo_envio;
+
+        // Guardar venta
+        await sheetPost(SHEET_VENTAS, {
+          id, fecha, fecha_iso,
+          cliente, telefono, departamento, ciudad, direccion,
+          productos_json: JSON.stringify(items),
+          total, estado,
+          banco, link_pago,
+          costo_envio: costo_envio.toFixed(2),
+          comision_5: comision_5.toFixed(2),
+          neto: neto.toFixed(2)
+        });
+
+        // Descontar inventario
+        for (const it of items) {
+          const prod = findProductByName(it.producto);
+          const stockActual = Number(prod.stock || 0);
+          const nuevoStock = stockActual - Number(it.cantidad);
+          await updateProductStockByName(it.producto, nuevoStock);
+        }
+
+        // Limpieza
         e.target.reset();
+        const itemsWrap = document.getElementById("v-items");
+        if (itemsWrap) itemsWrap.innerHTML = "";
         closeModal("modal-venta");
-        toast("✅ Venta guardada");
+
+        toast("✅ Venta guardada y stock actualizado");
         await loadFromSheetDB();
+
       } catch (err) {
         console.error(err);
         setBadge("⚠️ Error");
@@ -788,7 +1112,15 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
 
     $("#btn-csv-fin").addEventListener("click", () => {
       const filtered = getFilteredSales();
-      const fin = filtered.map(s => ({ fecha: s.fecha, cliente: s.cliente, neto: s.neto || s.total }));
+      const fin = filtered.map(s => ({
+        fecha: s.fecha,
+        cliente: s.cliente,
+        estado: s.estado,
+        banco: s.banco || "",
+        envio: (String(s.estado||"").toLowerCase()==="cancelado") ? 0 : COSTO_ENVIO_POR_VENTA,
+        comision_5: Number(s.comision_5 || ((s.estado==="Pago al recibir en efectivo") ? (Number(s.total||0)*0.05) : 0)).toFixed(2),
+        neto: computeNetoForRow(s).toFixed(2)
+      }));
       downloadCSV("finanzas_filtradas.csv", fin);
     });
   }
@@ -800,7 +1132,7 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
     bindEvents();
     setView("dash");
     await loadFromSheetDB();
-    console.log("JBELLE + SheetDB + Filtro fechas listo ✅");
+    console.log("JBELLE + SheetDB + Inventario + Pago + Finanzas (envío+comisión) + Filtro fechas listo ✅");
   });
 
 })();
