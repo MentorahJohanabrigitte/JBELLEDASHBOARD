@@ -113,6 +113,25 @@
         </div>
       </div>
 
+      <!-- Filtro por fechas -->
+      <div class="glass-card mb-6">
+        <div class="flex flex-col md:flex-row gap-3 md:items-end">
+          <div class="flex-1">
+            <div class="text-xs font-bold muted mb-1">Desde</div>
+            <input type="date" id="f-from" class="input-b" />
+          </div>
+          <div class="flex-1">
+            <div class="text-xs font-bold muted mb-1">Hasta</div>
+            <input type="date" id="f-to" class="input-b" />
+          </div>
+          <div class="flex gap-2">
+            <button class="btn-p" id="btn-apply-filter">Filtrar</button>
+            <button class="btn-ghost" id="btn-clear-filter">Limpiar</button>
+          </div>
+        </div>
+        <div class="muted small mt-2">Tip: si solo pones “Desde”, filtra desde esa fecha en adelante. Si solo pones “Hasta”, filtra hacia atrás.</div>
+      </div>
+
       <div class="glass-card">
         <table id="t-sales">
           <thead>
@@ -122,7 +141,7 @@
           </thead>
           <tbody id="b-sales"></tbody>
         </table>
-        <div id="sales-empty" class="muted text-sm mt-4 hidden">Aún no hay ventas registradas.</div>
+        <div id="sales-empty" class="muted text-sm mt-4 hidden">No hay ventas para este filtro.</div>
       </div>
     </div>
 
@@ -153,11 +172,12 @@
       </div>
 
       <div class="glass-card">
+        <div class="muted small mb-4">Este reporte respeta el mismo filtro de fechas aplicado en “Ventas”.</div>
         <table id="t-fin">
           <thead><tr><th>Fecha</th><th>Cliente</th><th>Neto</th></tr></thead>
           <tbody id="b-fin"></tbody>
         </table>
-        <div id="fin-empty" class="muted text-sm mt-4 hidden">Aún no hay datos financieros (se generan con ventas).</div>
+        <div id="fin-empty" class="muted text-sm mt-4 hidden">No hay finanzas para este filtro.</div>
       </div>
     </div>
 
@@ -222,7 +242,7 @@
       </div>
 
       <div class="muted small mt-4">
-        Nota: se guarda en tu hoja <b>ventas</b>.
+        Tip recomendado: agrega columna <b>fecha_iso</b> en tu hoja ventas para filtros perfectos (este código ya la llena).
       </div>
     </form>
   </div>
@@ -236,8 +256,6 @@
   // CONFIG
   // =========================
   const API = "https://sheetdb.io/api/v1/pfye2lgmsymzk";
-
-  // Hojas esperadas (nombres EXACTOS)
   const SHEET_VENTAS = "ventas";
   const SHEET_PROD   = "productos";
 
@@ -247,21 +265,18 @@
   let sales = [];
   let products = [];
 
+  // Filtro fechas (ISO: YYYY-MM-DD)
+  let filterFromISO = "";
+  let filterToISO = "";
+
   // =========================
   // DOM HELPERS
   // =========================
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
-  function setStatus(text) {
-    const el = $("#status");
-    if (el) el.textContent = text;
-  }
-
-  function setBadge(text) {
-    const el = $("#badge-sync");
-    if (el) el.textContent = text;
-  }
+  function setStatus(text) { const el = $("#status"); if (el) el.textContent = text; }
+  function setBadge(text) { const el = $("#badge-sync"); if (el) el.textContent = text; }
 
   function toast(msg) {
     const t = $("#toast");
@@ -287,6 +302,10 @@
 
   function todayHN() {
     return new Date().toLocaleDateString('es-HN');
+  }
+
+  function todayISO() {
+    return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
   }
 
   // =========================
@@ -326,7 +345,6 @@
     }
   }
 
-  // ESC para cerrar modales
   function onKeyDown(e) {
     if (e.key === "Escape") {
       $$('.modal-overlay.active').forEach(m => {
@@ -334,6 +352,43 @@
         m.setAttribute('aria-hidden', 'true');
       });
     }
+  }
+
+  // =========================
+  // FECHAS + FILTRO
+  // =========================
+  function parseDateToISO(fechaStr) {
+    // Soporta:
+    // - "YYYY-MM-DD"
+    // - "dd/mm/yyyy" (es-HN)
+    // - "d/m/yyyy"
+    const s = String(fechaStr || "").trim();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      const dd = m[1].padStart(2, "0");
+      const mm = m[2].padStart(2, "0");
+      const yyyy = m[3];
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    return "";
+  }
+
+  function inRangeISO(iso, fromISO, toISO) {
+    if (!iso) return false;
+    if (fromISO && iso < fromISO) return false;
+    if (toISO && iso > toISO) return false;
+    return true;
+  }
+
+  function getFilteredSales() {
+    if (!filterFromISO && !filterToISO) return sales;
+    return sales.filter(s => {
+      const iso = s.fecha_iso || parseDateToISO(s.fecha);
+      return inRangeISO(iso, filterFromISO, filterToISO);
+    });
   }
 
   // =========================
@@ -355,7 +410,6 @@
     return await res.json();
   }
 
-  // DELETE por id: requiere columna 'id' o 'ID' en tu hoja ventas.
   async function sheetDeleteById(sheetName, idValue) {
     const url = `${API}/id/${encodeURIComponent(idValue)}?sheet=${encodeURIComponent(sheetName)}`;
     const res = await fetch(url, { method: "DELETE" });
@@ -376,7 +430,6 @@
         sheetGet(SHEET_PROD)
       ]);
 
-      // SheetDB devuelve strings usualmente
       sales = Array.isArray(v) ? v : [];
       products = Array.isArray(p) ? p : [];
 
@@ -397,22 +450,27 @@
   // RENDER
   // =========================
   function renderDashboard() {
-    const totalVentas = sales.reduce((acc, s) => acc + Number(s.total || 0), 0);
-    const cantidadVentas = sales.length;
+    const filtered = getFilteredSales();
+    const totalVentas = filtered.reduce((acc, s) => acc + Number(s.total || 0), 0);
+    const cantidadVentas = filtered.length;
     const productosCount = products.length;
     const stockTotal = products.reduce((acc, p) => acc + Number(p.stock || 0), 0);
+
+    const labelFiltro = (filterFromISO || filterToISO)
+      ? `Filtro: ${filterFromISO || "…"} → ${filterToISO || "…"}`
+      : "Sin filtro de fechas";
 
     const dash = $('#dash-stats');
     dash.innerHTML = `
       <div class="stat">
         <div class="label">Total vendido</div>
         <div class="value">${money(totalVentas)}</div>
-        <div class="muted text-sm mt-1">Suma de todas las ventas</div>
+        <div class="muted text-sm mt-1">${escapeHtml(labelFiltro)}</div>
       </div>
       <div class="stat">
-        <div class="label">Ventas registradas</div>
+        <div class="label">Ventas (según filtro)</div>
         <div class="value">${cantidadVentas}</div>
-        <div class="muted text-sm mt-1">Cantidad de órdenes</div>
+        <div class="muted text-sm mt-1">Órdenes en el rango</div>
       </div>
       <div class="stat">
         <div class="label">Inventario</div>
@@ -421,7 +479,7 @@
       </div>
     `;
 
-    const last = sales.slice().reverse().slice(0, 5);
+    const last = filtered.slice().reverse().slice(0, 5);
     const tbody = $('#b-last-sales');
     tbody.innerHTML = last.map(s => `
       <tr>
@@ -431,7 +489,7 @@
         <td>${escapeHtml(s.estado)}</td>
       </tr>
     `).join('') || `
-      <tr><td colspan="4" class="muted">Aún no hay ventas para mostrar.</td></tr>
+      <tr><td colspan="4" class="muted">No hay ventas para mostrar en este filtro.</td></tr>
     `;
   }
 
@@ -439,30 +497,29 @@
     const tbody = $('#b-sales');
     const empty = $('#sales-empty');
 
-    if (!sales.length) {
+    const filtered = getFilteredSales();
+
+    if (!filtered.length) {
       tbody.innerHTML = '';
       empty.classList.remove('hidden');
       return;
     }
     empty.classList.add('hidden');
 
-    // Mostrar últimas primero
-    const reversed = sales.slice().reverse();
+    const reversed = filtered.slice().reverse();
 
     tbody.innerHTML = reversed.map((sale, idxFromTop) => {
-      // el objeto original en sales:
-      const saleOriginal = sale;
-      const id = saleOriginal.id || saleOriginal.ID || "";
+      const id = sale.id || sale.ID || "";
 
       return `
         <tr>
-          <td>${escapeHtml(saleOriginal.fecha)}</td>
+          <td>${escapeHtml(sale.fecha)}</td>
           <td>
-            <b>${escapeHtml(saleOriginal.cliente)}</b>
-            <div class="text-xs muted">${escapeHtml(saleOriginal.telefono || "")}</div>
+            <b>${escapeHtml(sale.cliente)}</b>
+            <div class="text-xs muted">${escapeHtml(sale.telefono || "")}</div>
           </td>
-          <td>${money(saleOriginal.total)}</td>
-          <td>${escapeHtml(saleOriginal.estado)}</td>
+          <td>${money(sale.total)}</td>
+          <td>${escapeHtml(sale.estado)}</td>
           <td class="flex gap-2 flex-wrap">
             <button class="btn-ghost" data-copy="${idxFromTop}">📋 Copiar</button>
             <button class="btn-danger" data-del="${escapeHtml(id)}" ${id ? "" : "disabled title='Agrega columna id en la hoja ventas para eliminar' style='opacity:.5;cursor:not-allowed;'"}>Eliminar</button>
@@ -498,14 +555,16 @@
     const tbody = $('#b-fin');
     const empty = $('#fin-empty');
 
-    if (!sales.length) {
+    const filtered = getFilteredSales();
+
+    if (!filtered.length) {
       tbody.innerHTML = '';
       empty.classList.remove('hidden');
       return;
     }
     empty.classList.add('hidden');
 
-    tbody.innerHTML = sales.slice().reverse().map(s => `
+    tbody.innerHTML = filtered.slice().reverse().map(s => `
       <tr>
         <td>${escapeHtml(s.fecha)}</td>
         <td>${escapeHtml(s.cliente)}</td>
@@ -519,31 +578,6 @@
     renderSales();
     renderInventory();
     renderFinance();
-  }
-
-  // =========================
-  // CSV
-  // =========================
-  function downloadCSV(filename, rows) {
-    if (!rows || !rows.length) {
-      alert('No hay datos para exportar.');
-      return;
-    }
-    const headers = Object.keys(rows[0]);
-    const csv = [
-      headers.join(','),
-      ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replaceAll('"','""')}"`).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
   }
 
   // =========================
@@ -577,7 +611,6 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
       await navigator.clipboard.writeText(txt);
       toast("✅ Mensaje copiado. Pégalo en WhatsApp.");
     } catch {
-      // Fallback
       const ta = document.createElement("textarea");
       ta.value = txt;
       document.body.appendChild(ta);
@@ -586,6 +619,31 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
       ta.remove();
       toast("✅ Mensaje copiado. Pégalo en WhatsApp.");
     }
+  }
+
+  // =========================
+  // CSV
+  // =========================
+  function downloadCSV(filename, rows) {
+    if (!rows || !rows.length) {
+      alert('No hay datos para exportar.');
+      return;
+    }
+    const headers = Object.keys(rows[0]);
+    const csv = [
+      headers.join(','),
+      ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replaceAll('"','""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   // =========================
@@ -616,6 +674,24 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
     // Recargar
     $("#btn-reload").addEventListener("click", () => loadFromSheetDB());
 
+    // Filtrar
+    $("#btn-apply-filter").addEventListener("click", () => {
+      filterFromISO = $("#f-from").value || "";
+      filterToISO   = $("#f-to").value || "";
+      renderAll();
+      toast("✅ Filtro aplicado");
+    });
+
+    // Limpiar filtro
+    $("#btn-clear-filter").addEventListener("click", () => {
+      filterFromISO = "";
+      filterToISO = "";
+      $("#f-from").value = "";
+      $("#f-to").value = "";
+      renderAll();
+      toast("🧹 Filtro limpiado");
+    });
+
     // Guardar producto -> SheetDB
     $("#f-prod").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -628,7 +704,6 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
         const stock = Number($("#p-stock").value);
         const precio = Number($("#p-price").value);
 
-        // IMPORTANTE: nombres de columnas
         await sheetPost(SHEET_PROD, { nombre, estilo, sucursal, stock, precio });
 
         e.target.reset();
@@ -642,25 +717,22 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
       }
     });
 
-    // Guardar venta -> SheetDB
+    // Guardar venta -> SheetDB (incluye fecha_iso)
     $("#f-venta").addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
         setBadge("⏳ Guardando…");
 
-        // Para eliminar luego: si tienes columna "id" en tu Sheet,
-        // puedes generar un id aquí (recomendado).
         const id = "V-" + Date.now();
-
         const fecha = todayHN();
+        const fecha_iso = todayISO(); // NUEVO: para filtrar perfecto
         const cliente = $("#v-cliente").value.trim();
         const telefono = $("#v-telefono").value.trim();
         const direccion = $("#v-direccion").value.trim();
         const total = Number($("#v-total").value);
         const estado = $("#v-estado").value;
 
-        // En tu hoja ventas, crea columna "id" y listo (esto lo llenará)
-        await sheetPost(SHEET_VENTAS, { id, fecha, cliente, telefono, direccion, total, estado });
+        await sheetPost(SHEET_VENTAS, { id, fecha, fecha_iso, cliente, telefono, direccion, total, estado });
 
         e.target.reset();
         closeModal("modal-venta");
@@ -678,8 +750,8 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
       const btnCopy = e.target.closest("[data-copy]");
       if (btnCopy) {
         const idxFromTop = Number(btnCopy.getAttribute("data-copy"));
-        const reversed = sales.slice().reverse();
-        const venta = reversed[idxFromTop];
+        const filtered = getFilteredSales().slice().reverse();
+        const venta = filtered[idxFromTop];
         if (venta) await copyText(buildWhatsAppMessage(venta));
         return;
       }
@@ -706,12 +778,18 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
       }
     });
 
-    // CSV
-    $("#btn-csv-ventas").addEventListener("click", () => downloadCSV("ventas.csv", sales));
+    // CSV (ventas/finanzas respetan filtro)
+    $("#btn-csv-ventas").addEventListener("click", () => {
+      const filtered = getFilteredSales();
+      downloadCSV("ventas_filtradas.csv", filtered);
+    });
+
     $("#btn-csv-inv").addEventListener("click", () => downloadCSV("inventario.csv", products));
+
     $("#btn-csv-fin").addEventListener("click", () => {
-      const fin = sales.map(s => ({ fecha: s.fecha, cliente: s.cliente, neto: s.neto || s.total }));
-      downloadCSV("finanzas.csv", fin);
+      const filtered = getFilteredSales();
+      const fin = filtered.map(s => ({ fecha: s.fecha, cliente: s.cliente, neto: s.neto || s.total }));
+      downloadCSV("finanzas_filtradas.csv", fin);
     });
   }
 
@@ -722,7 +800,7 @@ Nos pondremos en contacto para coordinar la entrega 🚚`;
     bindEvents();
     setView("dash");
     await loadFromSheetDB();
-    console.log("JBELLE + SheetDB listo ✅");
+    console.log("JBELLE + SheetDB + Filtro fechas listo ✅");
   });
 
 })();
